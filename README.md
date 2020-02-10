@@ -37,6 +37,11 @@ q d
 *Explanation:* Start firefox inside a disposable VM.
 
 ```
+q d t
+```
+*Explanation:* Start a terminal inside a disposable VM.
+
+```
 q m
 ```
 *Explanation:* Start thunderbird inside the `e-mail` VM.
