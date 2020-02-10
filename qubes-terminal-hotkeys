@@ -1,0 +1,316 @@
+#!/bin/bash
+#
+# Script to simplify daily work with the Qubes OS dom0 command line (e.g. managing & starting VMs and running commands in these).
+# Meant to be particularly useful with the awesome WM Meta+R key combination for executing commands in dom0.
+#
+# Copyright (C) 2020  David Hobach  GPLv3
+# version: 2.0
+# 
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+# 
+
+#errorOut [message]
+function errorOut {
+>&2 echo "ERROR: $1"
+>&2 echo "Aborting..."
+exit 1
+}
+
+#directory of this script (hopefully...)
+SCRIPT_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+
+#get config
+CONF="/etc/qubes-terminal-hotkeys.conf"
+[ -f "/etc/qubes-terminal-hotkeys.conf" ] || CONF="$SCRIPT_DIR/qubes-terminal-hotkeys.conf"
+source "$CONF" || errorOut "Failed to read the configuration $CONF."
+
+#usage
+function usage {
+echo "[hotkey] [Options] [VM name or VM short name] [additional arguments]
+
+configuration: $CONF
+
+[hotkey]: hotkey to execute a given action as specified inside your configuration
+[VM name or VM short name]: name of the VM or its short version as in your configuration; short name comparisons are always case insensitive
+
+Options:
+-v: verbose output
+-h: display this help and exit
+
+specials - action_run:
+[VM name or VM short name]:
+	- for template VMs always start a disposable VM using that VM as template
+	- $DOM_ZERO_ID: Executes the given command in dom0.
+	- no VM specified: Executes $DOM_ZERO_DEFAULT_COMMAND in dom0.
+[additional arguments]: command and its arguments to execute in the given VM; if no command is specified, execute the default command for the given VM and if that one is not specified, fall back to the global default"
+}
+
+#getRealVMName [pseudo VM name provided by the user]
+#get the real name of a VM for a given pseudo name, i.e. do the mapping
+#returns: the real name or nothing, if it could not be found or there was an error
+function getRealVMName {
+#case insensitive @associative VM array
+local pseudoName=$(echo "$1" | tr "[:upper:]" "[:lower:]")
+local ret=""
+	case "$pseudoName" in
+		"")
+		local ret="$DOM_ZERO_ID"
+		;;
+
+		"$DOM_ZERO_ID")
+		local ret="$DOM_ZERO_ID"
+		;;
+
+		*)
+		local ret="${VM_SHORT_NAMES[$pseudoName]}"
+		;;
+	esac
+
+#if no mapping was done, the name provided by the user should be the real name
+[ -z "$ret" ] && local ret="$1"
+
+echo "$ret"
+}
+
+#getDefaultCommand [full VM name]
+#get the default command for the given VM
+#returns: the default command or nothing in case of an error
+function getDefaultCommand {
+local vmName="$1"
+local ret=""
+	case "$vmName" in
+			"$DOM_ZERO_ID")
+			local ret="$DOM_ZERO_DEFAULT_COMMAND"
+			;;
+
+			*)
+			local ret="${VM_DEFAULT_COMMANDS["$1"]}"
+			#NOTE: we just check whether the key exists (it may have an empty value --> then we return that as it indicates that the VM should be started without command)
+			[ ${VM_DEFAULT_COMMANDS["$1"]+_} ] || local ret="$VM_DEFAULT_COMMAND"
+			;;
+		esac
+echo "$ret"
+}
+
+#getRealCommand [full VM name] [command provided by the user]
+#get the real command to execute, i.e. check whether it's empty or can be mapped and if so, return the appropriate command
+#returns: the command to execute or nothing in case of an error
+function getRealCommand {
+local vmName="$1"
+local vmCommand="$2"
+	if [ -n "$vmCommand" ] ; then
+		#user provided something -> check whether it can be mapped and if not, just return whatever the user wrote
+		local mappedCommand=${COMMANDS["$vmCommand"]}
+			if [ -n "$mappedCommand" ] ; then
+				echo "$mappedCommand"
+			else
+				echo "$vmCommand"
+			fi
+		return
+	else
+		#try to find a default
+		getDefaultCommand "$vmName"
+	fi
+}
+
+#execDom0PreCommand [VM full name] [command] [verbose = 1/0]
+#execute any pre-command for dom0 given by $DOM0_PRE_COMMANDS, if any
+#sets the exit code according to the exit code of the executed command or to 0, if no command was executed
+function execDom0PreCommand {
+local vmName="$1"
+local vmCommand="$2"
+local verbose=$3
+
+#sanity check
+[ -z "$vmName" ] && errorOut "execDom0PreCommand(): No VM specified."
+
+#get the dom0 pre-command, if any
+local preCommand=${DOM0_PRE_COMMANDS["${vmName}_${vmCommand}"]}
+[ -z "$preCommand" ] && preCommand=${DOM0_PRE_COMMANDS["${vmName}"]}
+
+#something to execute?
+if [ -n "$preCommand" ] ; then
+	#verbose output
+	[ $verbose -eq 1 ] && echo "Executing the pre-command (dom0): $preCommand"
+
+	#exec & use status code
+	eval "$preCommand"
+	return $?
+else
+	return 0
+fi
+}
+
+#isDvmTemplate [VM full name]
+#returns: Sets a zero exit code, if and only if the given VM is a template for disposable VMs.
+function isDvmTemplate {
+local vm="$1"
+[[ "$(qvm-prefs "$vm" "template_for_dispvms" 2> /dev/null)" == [tT]rue ]]
+}
+
+#execVMCommand [VM full name] [verbose = 1/0] [command] [command params]
+#execute the given command on the given VM
+#if no command is given, the VM is only started
+#the VM full name may also be $DOM_ZERO_ID
+#sets the exit code according to the exit code of the executed command
+function execVMCommand {
+local vmName="$1"
+local verbose="$2"
+local vmCommand="$3"
+shift 3
+
+#add parameters to command
+for par in "$@" ; do
+	printf -v vmCommand '%s %q' "$vmCommand" "$par"
+done
+
+#sanity checks
+[ -z "$vmName" ] && errorOut "execVMCommand(): No VM specified."
+[ $verbose -ne 1 ] && [ $verbose -ne 0 ] && errorOut "execVMCommand(): Invalid value for the verbose flag: $verbose"
+
+#verbose output
+[ $verbose -eq 1 ] && echo "Executing: $vmName -> $vmCommand"
+
+#execute
+	case "$vmName" in
+		"$DOM_ZERO_ID")
+			eval "$vmCommand"
+			return $?
+		;;
+
+		*)
+			#check whether it's a disposable VM template
+			local isDvm
+			isDvmTemplate "$vmName"
+			isDvm=$?
+
+			#run the command
+			if [ -z "$vmCommand" ] ; then
+				if [ $isDvm -ne 0 ] ; then
+					[ $verbose -eq 1 ] && echo "execVMCommand(): No command specified. --> Just starting the $vmName VM."
+					qvm-start "$vmName" &> /dev/null
+					return $?
+				else
+					[ $verbose -eq 1 ] && echo "execVMCommand(): No command specified, but $vmName appears to be a dispVM template. --> Doing nothing."
+					return 1
+				fi
+
+			else
+				local addParams=""
+
+                                #starting non-dispVMs before using qvm-run seems to be the more reliable way in 4.0rc1
+                                if [ $isDvm -eq 0 ] ; then
+				       	addParams="--dispvm"
+				else
+				      	qvm-start "$vmName"
+					addParams="-n"
+				fi
+
+                                #in 2017-08 Marek stated that only qvm-run -p --dispvm fedora-25-dvm --service qubes.StartApp+firefox is guaranteed to wait for X for dispVMs; unfortunately it cannot take parameters --> we take the risk
+                                qvm-run $addParams "$vmName" "$vmCommand" < /dev/null &> /dev/null
+                                return $?
+                        fi
+		;;
+	esac
+}
+
+#action_run [vm] [command] [command argumnents]
+#Executes the run action.
+function action_run {
+local vm="$1"
+local vmCommand="$2"
+
+#get the real VM name & command
+vmCommand="$(getRealCommand "$vmName" "$vmCommand")"
+
+#execute any necessary pre-command in dom0
+execDom0PreCommand "$vmName" "$vmCommand" $oVerbose || errorOut "Executing the dom0 pre-command failed for some reason."
+
+#execute
+#NOTE: in the ancient version of dom0 bash, 2x shift produces something different than shift 2 (the first removes a single parameter, the latter leaves it)
+shift
+shift
+execVMCommand "$vmName" "$oVerbose" "$vmCommand" "$@"
+}
+
+#action_shutdown [vm]
+function action_shutdown {
+local vm="$1"
+
+if [[ "$vm" == "$DOM_ZERO_ID" ]] ; then
+	[ -n "$DOM_ZERO_SHUTDOWN" ] && eval "$DOM_ZERO_SHUTDOWN"
+else
+	qvm-shutdown --wait "$vm"
+fi
+}
+
+#action_kill [vm]
+function action_kill {
+local vm="$1"
+
+if [[ "$vm" == "$DOM_ZERO_ID" ]] ; then
+	action_shutdown "$vm"
+else
+	qvm-kill "$vm"
+fi
+}
+
+#action_pause [vm]
+function action_pause {
+local vm="$1"
+
+if [[ "$vm" == "$DOM_ZERO_ID" ]] ; then
+	#maybe TODO: go to sleep/hibernate
+	errorOut "Currently not implemented."
+else
+	qvm-pause "$vm"
+fi
+}
+
+#parse parameters
+hotkey="$(basename "$0")"
+[ "$hotkey" == "qubes-terminal-hotkeys" ] && usage && exit 0
+oVerbose=0
+while [[ "$1" == "-"* ]] ; do
+	case "$1" in
+		"-v")
+		oVerbose=1
+		;;
+
+		"-h")
+		usage
+		exit 0
+		;;
+
+		*)
+		usage
+		echo ""
+		errorOut "Invalid option: $1"
+		;;
+	esac
+
+	shift
+done
+
+#get action
+action="${HOTKEYS["$hotkey"]}"
+[ -z "$action" ] && errorOut "The hotkey $hotkey is not defined inside $CONF."
+
+#get target VM
+vmName="${1:-$DOM_ZERO_ID}"
+vmName="$(getRealVMName "$vmName")"
+shift
+
+#execute action
+"$action" "$vmName" "$@"
