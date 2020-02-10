@@ -177,7 +177,6 @@ done
 
 #sanity checks
 [ -z "$vmName" ] && errorOut "execVMCommand(): No VM specified."
-[ $verbose -ne 1 ] && [ $verbose -ne 0 ] && errorOut "execVMCommand(): Invalid value for the verbose flag: $verbose"
 
 #verbose output
 [ $verbose -eq 1 ] && echo "Executing: $vmName -> $vmCommand"
@@ -251,6 +250,7 @@ local vm="$1"
 if [[ "$vm" == "$DOM_ZERO_ID" ]] ; then
 	[ -n "$DOM_ZERO_SHUTDOWN" ] && eval "$DOM_ZERO_SHUTDOWN"
 else
+	[ $oVerbose -eq 1 ] && echo "Shutting down: $vm"
 	qvm-shutdown --wait "$vm"
 fi
 }
@@ -262,6 +262,7 @@ local vm="$1"
 if [[ "$vm" == "$DOM_ZERO_ID" ]] ; then
 	action_shutdown "$vm"
 else
+	[ $oVerbose -eq 1 ] && echo "Killing: $vm"
 	qvm-kill "$vm"
 fi
 }
@@ -274,6 +275,7 @@ if [[ "$vm" == "$DOM_ZERO_ID" ]] ; then
 	#maybe TODO: go to sleep/hibernate
 	errorOut "Currently not implemented."
 else
+	[ $oVerbose -eq 1 ] && echo "Pausing: $vm"
 	qvm-pause "$vm"
 fi
 }
