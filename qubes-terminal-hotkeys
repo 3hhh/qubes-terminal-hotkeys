@@ -231,16 +231,16 @@ local vm="$1"
 local vmCommand="$2"
 
 #get the real VM name & command
-vmCommand="$(getRealCommand "$vmName" "$vmCommand")"
+vmCommand="$(getRealCommand "$vm" "$vmCommand")"
 
 #execute any necessary pre-command in dom0
-execDom0PreCommand "$vmName" "$vmCommand" $oVerbose || errorOut "Executing the dom0 pre-command failed for some reason."
+execDom0PreCommand "$vm" "$vmCommand" $oVerbose || errorOut "Executing the dom0 pre-command for $vm failed for some reason."
 
 #execute
 #NOTE: in the ancient version of dom0 bash, 2x shift produces something different than shift 2 (the first removes a single parameter, the latter leaves it)
 shift
 shift
-execVMCommand "$vmName" "$oVerbose" "$vmCommand" "$@"
+execVMCommand "$vm" "$oVerbose" "$vmCommand" "$@"
 }
 
 #action_shutdown [vm]
