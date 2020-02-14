@@ -4,7 +4,7 @@
 # Meant to be particularly useful with the awesome WM Meta+R key combination for executing commands in dom0.
 #
 # Copyright (C) 2020  David Hobach  GPLv3
-# version: 2.0
+# version: 2.1
 # 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -243,41 +243,73 @@ shift
 execVMCommand "$vm" "$oVerbose" "$vmCommand" "$@"
 }
 
-#action_shutdown [vm]
-function action_shutdown {
-local vm="$1"
+#maction_shutdown [vm 1] ... [vm n]
+function maction_shutdown {
+local shutdownDom0=1
+local ret=0
 
-if [[ "$vm" == "$DOM_ZERO_ID" ]] ; then
-	[ -n "$DOM_ZERO_SHUTDOWN" ] && eval "$DOM_ZERO_SHUTDOWN"
-else
-	[ $oVerbose -eq 1 ] && echo "Shutting down: $vm"
-	qvm-shutdown --wait "$vm"
+if [[ "$1" == "$DOM_ZERO_ID" ]] ; then
+	shutdownDom0=0
+	shift
 fi
+
+if [ $# -gt 0 ] ; then
+	[ $oVerbose -eq 1 ] && echo "Shutting down: $@"
+	qvm-shutdown --wait "$@"
+	ret=$?
+fi
+
+if [ $shutdownDom0 -eq 0 ] && [ -n "$DOM_ZERO_SHUTDOWN" ] ; then
+	[ $oVerbose -eq 1 ] && echo "Shutting down: dom0"
+	eval "$DOM_ZERO_SHUTDOWN"
+	ret=$?
+fi
+
+return $ret
 }
 
-#action_kill [vm]
-function action_kill {
-local vm="$1"
+#maction_kill [vm 1] ... [vm n]
+function maction_kill {
+local killDom0=1
+local ret=0
 
-if [[ "$vm" == "$DOM_ZERO_ID" ]] ; then
-	action_shutdown "$vm"
-else
-	[ $oVerbose -eq 1 ] && echo "Killing: $vm"
-	qvm-kill "$vm"
+if [[ "$1" == "$DOM_ZERO_ID" ]] ; then
+	killDom0=0
+	shift
 fi
+
+if [ $# -gt 0 ] ; then
+	[ $oVerbose -eq 1 ] && echo "Killing: $@"
+	qvm-kill "$@"
+	ret=$?
+fi
+
+if [ $killDom0 -eq 0 ] ; then
+	maction_shutdown "$DOM_ZERO_ID"
+	ret=$?
+fi
+
+return $ret
 }
 
-#action_pause [vm]
-function action_pause {
-local vm="$1"
+#maction_pause [vm 1] ... [vm n]
+function maction_pause {
+local ret=0
 
-if [[ "$vm" == "$DOM_ZERO_ID" ]] ; then
+if [[ "$1" == "$DOM_ZERO_ID" ]] ; then
 	#maybe TODO: go to sleep/hibernate
-	errorOut "Currently not implemented."
-else
-	[ $oVerbose -eq 1 ] && echo "Pausing: $vm"
-	qvm-pause "$vm"
+	>&2 echo "WARNING: Dom0 puasing currently not implemented. Ignoring..."
+	shift
+	ret=1
 fi
+
+if [ $# -gt 0 ] ; then
+	[ $oVerbose -eq 1 ] && echo "Pausing: $@"
+	qvm-pause "$@"
+	ret=$?
+fi
+
+return $ret
 }
 
 #parse parameters
@@ -309,10 +341,20 @@ done
 action="${HOTKEYS["$hotkey"]}"
 [ -z "$action" ] && errorOut "The hotkey $hotkey is not defined inside $CONF."
 
-#get target VM
-vmName="${1:-$DOM_ZERO_ID}"
-vmName="$(getRealVMName "$vmName")"
-shift
+#get target VMs
+vms=()
+if [[ "$action" == "maction_"* ]] ; then
+	for arg in "$@" ; do
+		arg="$(getRealVMName "$arg")"
+		#by convention, we insert dom0 at the front
+		[[ "$arg" == "$DOM_ZERO_ID" ]] && vms=("$arg" "${vms[@]}") || vms+=("$arg")
+		shift
+	done
+else
+	vms+=("${1:-$DOM_ZERO_ID}")
+	vms[0]="$(getRealVMName "${vms[0]}")"
+	shift
+fi
 
 #execute action
-$action "$vmName" "$@"
+$action "${vms[@]}" "$@"
