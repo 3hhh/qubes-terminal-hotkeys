@@ -30,6 +30,9 @@ exit 1
 #directory of this script (hopefully...)
 SCRIPT_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 
+#whether to print verbose information (0) or not (1)
+VERBOSE=1
+
 #get config
 CONF="/etc/qubes-terminal-hotkeys.conf"
 [ -f "/etc/qubes-terminal-hotkeys.conf" ] || CONF="$SCRIPT_DIR/qubes-terminal-hotkeys.conf"
@@ -142,7 +145,7 @@ local preCommand=${DOM0_PRE_COMMANDS["${vmName}_${vmCommand}"]}
 #something to execute?
 if [ -n "$preCommand" ] ; then
 	#verbose output
-	[ $verbose -eq 1 ] && echo "Executing the pre-command (dom0): $preCommand"
+	[ $verbose -eq 0 ] && echo "Executing the pre-command (dom0): $preCommand"
 
 	#exec & use status code
 	eval "$preCommand"
@@ -179,7 +182,7 @@ done
 [ -z "$vmName" ] && errorOut "execVMCommand(): No VM specified."
 
 #verbose output
-[ $verbose -eq 1 ] && echo "Executing: $vmName -> $vmCommand"
+[ $verbose -eq 0 ] && echo "Executing: $vmName -> $vmCommand"
 
 #execute
 	case "$vmName" in
@@ -197,11 +200,11 @@ done
 			#run the command
 			if [ -z "$vmCommand" ] ; then
 				if [ $isDvm -ne 0 ] ; then
-					[ $verbose -eq 1 ] && echo "execVMCommand(): No command specified. --> Just starting the $vmName VM."
+					[ $verbose -eq 0 ] && echo "execVMCommand(): No command specified. --> Just starting the $vmName VM."
 					qvm-start "$vmName" &> /dev/null
 					return $?
 				else
-					[ $verbose -eq 1 ] && echo "execVMCommand(): No command specified, but $vmName appears to be a dispVM template. --> Doing nothing."
+					[ $verbose -eq 0 ] && echo "execVMCommand(): No command specified, but $vmName appears to be a dispVM template. --> Doing nothing."
 					return 1
 				fi
 
@@ -234,13 +237,13 @@ local vmCommand="$2"
 vmCommand="$(getRealCommand "$vm" "$vmCommand")"
 
 #execute any necessary pre-command in dom0
-execDom0PreCommand "$vm" "$vmCommand" $oVerbose || errorOut "Executing the dom0 pre-command for $vm failed for some reason."
+execDom0PreCommand "$vm" "$vmCommand" $VERBOSE || errorOut "Executing the dom0 pre-command for $vm failed for some reason."
 
 #execute
 #NOTE: in the ancient version of dom0 bash, 2x shift produces something different than shift 2 (the first removes a single parameter, the latter leaves it)
 shift
 shift
-execVMCommand "$vm" "$oVerbose" "$vmCommand" "$@"
+execVMCommand "$vm" "$VERBOSE" "$vmCommand" "$@"
 }
 
 #maction_shutdown [vm 1] ... [vm n]
@@ -254,13 +257,13 @@ if [[ "$1" == "$DOM_ZERO_ID" ]] ; then
 fi
 
 if [ $# -gt 0 ] ; then
-	[ $oVerbose -eq 1 ] && echo "Shutting down: $@"
+	[ $VERBOSE -eq 0 ] && echo "Shutting down: $@"
 	qvm-shutdown --wait "$@"
 	ret=$?
 fi
 
 if [ $shutdownDom0 -eq 0 ] && [ -n "$DOM_ZERO_SHUTDOWN" ] ; then
-	[ $oVerbose -eq 1 ] && echo "Shutting down: dom0"
+	[ $VERBOSE -eq 0 ] && echo "Shutting down: dom0"
 	eval "$DOM_ZERO_SHUTDOWN"
 	ret=$?
 fi
@@ -279,7 +282,7 @@ if [[ "$1" == "$DOM_ZERO_ID" ]] ; then
 fi
 
 if [ $# -gt 0 ] ; then
-	[ $oVerbose -eq 1 ] && echo "Killing: $@"
+	[ $VERBOSE -eq 0 ] && echo "Killing: $@"
 	qvm-kill "$@"
 	ret=$?
 fi
@@ -304,7 +307,7 @@ if [[ "$1" == "$DOM_ZERO_ID" ]] ; then
 fi
 
 if [ $# -gt 0 ] ; then
-	[ $oVerbose -eq 1 ] && echo "Pausing: $@"
+	[ $VERBOSE -eq 0 ] && echo "Pausing: $@"
 	qvm-pause "$@"
 	ret=$?
 fi
@@ -312,14 +315,16 @@ fi
 return $ret
 }
 
+function main {
+local hotkey=
+
 #parse parameters
-hotkey="$(basename "$0")"
+hotkey="$(basename "$0")" || errorOut "Failed to execute basename."
 [ "$hotkey" == "qubes-terminal-hotkeys" ] && usage && exit 0
-oVerbose=0
 while [[ "$1" == "-"* ]] ; do
 	case "$1" in
 		"-v")
-		oVerbose=1
+		VERBOSE=0
 		;;
 
 		"-h")
@@ -338,10 +343,11 @@ while [[ "$1" == "-"* ]] ; do
 done
 
 #get action
-action="${HOTKEYS["$hotkey"]}"
+local action="${HOTKEYS["$hotkey"]}"
 [ -z "$action" ] && errorOut "The hotkey $hotkey is not defined inside $CONF."
 
 #get target VMs
+local arg=
 vms=()
 if [[ "$action" == "maction_"* ]] ; then
 	for arg in "$@" ; do
@@ -358,3 +364,6 @@ fi
 
 #execute action
 $action "${vms[@]}" "$@"
+}
+
+main "$@"
