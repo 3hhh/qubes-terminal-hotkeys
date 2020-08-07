@@ -170,6 +170,7 @@ qvm-start "$vm"
 ret=$?
 
 #make sure the VM is unpaused
+#cf. qubes issue #5967
 qvm-unpause "$vm" &> /dev/null
 return $ret
 }
@@ -269,6 +270,13 @@ if [[ "$1" == "$DOM_ZERO_ID" ]] ; then
 fi
 
 if [ $# -gt 0 ] ; then
+	#make sure the VMs are unpaused
+	#cf. qubes issue #5987
+	local vm=
+	for vm in "$@" ; do
+		qvm-unpause "$vm" &> /dev/null
+	done
+
 	[ $VERBOSE -eq 0 ] && echo "Shutting down: $@"
 	qvm-shutdown --wait "$@"
 	ret=$?
