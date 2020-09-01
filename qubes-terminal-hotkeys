@@ -92,17 +92,19 @@ echo "$ret"
 function getDefaultCommand {
 local vmName="$1"
 local ret=""
-	case "$vmName" in
-			"$DOM_ZERO_ID")
+
+case "$vmName" in
+		"$DOM_ZERO_ID")
 			local ret="$DOM_ZERO_DEFAULT_COMMAND"
 			;;
 
-			*)
+		*)
 			local ret="${VM_DEFAULT_COMMANDS["$1"]}"
 			#NOTE: we just check whether the key exists (it may have an empty value --> then we return that as it indicates that the VM should be started without command)
 			[ ${VM_DEFAULT_COMMANDS["$1"]+_} ] || local ret="$VM_DEFAULT_COMMAND"
 			;;
-		esac
+esac
+
 echo "$ret"
 }
 
@@ -112,19 +114,20 @@ echo "$ret"
 function getRealCommand {
 local vmName="$1"
 local vmCommand="$2"
-	if [ -n "$vmCommand" ] ; then
-		#user provided something -> check whether it can be mapped and if not, just return whatever the user wrote
-		local mappedCommand=${COMMANDS["$vmCommand"]}
-			if [ -n "$mappedCommand" ] ; then
-				echo "$mappedCommand"
-			else
-				echo "$vmCommand"
-			fi
-		return
-	else
-		#try to find a default
-		getDefaultCommand "$vmName"
-	fi
+
+if [ -n "$vmCommand" ] ; then
+	#user provided something -> check whether it can be mapped and if not, just return whatever the user wrote
+	local mappedCommand=${COMMANDS["$vmCommand"]}
+		if [ -n "$mappedCommand" ] ; then
+			echo "$mappedCommand"
+		else
+			echo "$vmCommand"
+		fi
+	return
+else
+	#try to find a default
+	getDefaultCommand "$vmName"
+fi
 }
 
 #execDom0PreCommand [VM full name] [command] [verbose = 1/0]
@@ -198,46 +201,46 @@ done
 [ $verbose -eq 0 ] && echo "Executing: $vmName -> $vmCommand"
 
 #execute
-	case "$vmName" in
-		"$DOM_ZERO_ID")
-			eval "$vmCommand"
-			return $?
-		;;
+case "$vmName" in
+	"$DOM_ZERO_ID")
+		eval "$vmCommand"
+		return $?
+	;;
 
-		*)
-			#check whether it's a disposable VM template
-			local isDvm
-			isDvmTemplate "$vmName"
-			isDvm=$?
+	*)
+		#check whether it's a disposable VM template
+		local isDvm
+		isDvmTemplate "$vmName"
+		isDvm=$?
 
-			#run the command
-			if [ -z "$vmCommand" ] ; then
-				if [ $isDvm -ne 0 ] ; then
-					[ $verbose -eq 0 ] && echo "execVMCommand(): No command specified. --> Just starting the $vmName VM."
-					assertRunning "$vmName" &> /dev/null
-					return $?
-				else
-					[ $verbose -eq 0 ] && echo "execVMCommand(): No command specified, but $vmName appears to be a dispVM template. --> Doing nothing."
-					return 1
-				fi
-
+		#run the command
+		if [ -z "$vmCommand" ] ; then
+			if [ $isDvm -ne 0 ] ; then
+				[ $verbose -eq 0 ] && echo "execVMCommand(): No command specified. --> Just starting the $vmName VM."
+				assertRunning "$vmName" &> /dev/null
+				return $?
 			else
-				local addParams=""
+				[ $verbose -eq 0 ] && echo "execVMCommand(): No command specified, but $vmName appears to be a dispVM template. --> Doing nothing."
+				return 1
+			fi
 
-                                #starting non-dispVMs before using qvm-run seems to be the more reliable way in 4.0rc1
-                                if [ $isDvm -eq 0 ] ; then
-				       	addParams="--dispvm"
-				else
-					assertRunning  "$vmName"
-					addParams="-n"
-				fi
+		else
+			local addParams=""
 
-                                #in 2017-08 Marek stated that only qvm-run -p --dispvm fedora-25-dvm --service qubes.StartApp+firefox is guaranteed to wait for X for dispVMs; unfortunately it cannot take parameters --> we take the risk
-                                qvm-run $addParams "$vmName" "$vmCommand" < /dev/null &> /dev/null
-                                return $?
-                        fi
-		;;
-	esac
+			#starting non-dispVMs before using qvm-run seems to be the more reliable way in 4.0rc1
+			if [ $isDvm -eq 0 ] ; then
+				addParams="--dispvm"
+			else
+				assertRunning  "$vmName"
+				addParams="-n"
+			fi
+
+			#in 2017-08 Marek stated that only qvm-run -p --dispvm fedora-25-dvm --service qubes.StartApp+firefox is guaranteed to wait for X for dispVMs; unfortunately it cannot take parameters --> we take the risk
+			qvm-run $addParams "$vmName" "$vmCommand" < /dev/null &> /dev/null
+			return $?
+		fi
+	;;
+esac
 }
 
 #action_run [vm] [command] [command argumnents]
