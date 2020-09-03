@@ -280,7 +280,7 @@ fi
 
 if [ $# -gt 0 ] ; then
 	#make sure the VMs are unpaused
-	#cf. https://github.com/QubesOS/qubes-issues/issues/5967
+	#cf. https://github.com/QubesOS/qubes-issues/issues/5987
 	local vm=
 	for vm in "$@" ; do
 		qvm-unpause "$vm" &> /dev/null
