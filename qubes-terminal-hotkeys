@@ -168,9 +168,6 @@ local vm="$1"
 #assertRunning [vm]
 function assertRunning {
 local vm="$1"
-local ret=
-qvm-start "$vm"
-ret=$?
 
 #make sure the VM is unpaused
 if qvm-check --paused "$vm" &> /dev/null ; then
@@ -181,7 +178,7 @@ if qvm-check --paused "$vm" &> /dev/null ; then
 	fi
 fi
 
-return $ret
+qvm-start "$vm" &> /dev/null
 }
 
 #execVMCommand [VM full name] [verbose = 1/0] [command] [command params]
@@ -223,7 +220,7 @@ case "$vmName" in
 		if [ -z "$vmCommand" ] ; then
 			if [ $isDvm -ne 0 ] ; then
 				[ $verbose -eq 0 ] && echo "execVMCommand(): No command specified. --> Just starting the $vmName VM."
-				assertRunning "$vmName" &> /dev/null
+				assertRunning "$vmName"
 				return $?
 			else
 				[ $verbose -eq 0 ] && echo "execVMCommand(): No command specified, but $vmName appears to be a dispVM template. --> Doing nothing."
@@ -280,7 +277,7 @@ fi
 
 if [ $# -gt 0 ] ; then
 	#make sure the VMs are unpaused
-	#cf. https://github.com/QubesOS/qubes-issues/issues/5987
+	#cf. https://github.com/QubesOS/qubes-issues/issues/5967
 	local vm=
 	for vm in "$@" ; do
 		qvm-unpause "$vm" &> /dev/null
