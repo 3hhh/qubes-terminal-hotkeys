@@ -165,20 +165,34 @@ local vm="$1"
 [[ "$(qvm-prefs "$vm" "template_for_dispvms" 2> /dev/null)" == [tT]rue ]]
 }
 
-#assertRunning [vm]
+#assertRunning [vm] [start]
+#Assert that the given VM is running. Will unpause paused VMs and may start shut down VMs.
+#[vm]: VM for which to make sure it's running.
+#[start]: If it's not running and not paused, start it (default: 0/true). If set to 1, this function will return a non-zero exit code.
+#returns: A non-zero exit code, if it's not running and/or we failed to start the VM.
 function assertRunning {
 local vm="$1"
+local start="${2:-0}"
 
 #make sure the VM is unpaused
 if qvm-check --paused "$vm" &> /dev/null ; then
-	#the unpause is a hotfix for https://github.com/QubesOS/qubes-issues/issues/5967
-	if qvm-unpause "$vm" &> /dev/null ; then
+	if [[ "$vm" == "disp"* ]] ; then
+		qvm-unpause "$vm" &> /dev/null || return 1
+	else
 		#the qubes-gui-agent restart & clock sync is a hotfix for https://github.com/QubesOS/qubes-issues/issues/5988
-		[[ "$vm" != "disp"* ]] && qvm-run -u root -n --nogui "$vm" "qvm-sync-clock ; systemctl restart qubes-gui-agent" &> /dev/null < /dev/null
+		#NOTE: qvm-run -a includes unpause
+		qvm-run -u root -a --nogui "$vm" "qvm-sync-clock ; systemctl restart qubes-gui-agent" &> /dev/null < /dev/null || return 1
+	fi
+else
+	if [ $start -eq 0 ] ; then
+		qvm-start --skip-if-running "$vm" &> /dev/null || return 1
+	else
+		#we don't attempt to start
+		return 2
 	fi
 fi
 
-qvm-start "$vm" &> /dev/null
+return 0
 }
 
 #execVMCommand [VM full name] [verbose = 1/0] [command] [command params]
