@@ -74,7 +74,7 @@ q somevm someapp
 ```
 r m net
 ```
-*Explanation:* Execute the default commands for the VMs `e-mail` (i.e. `thunderbird`) and `sys-net` (i.e. `xterm`).  
+*Explanation:* Execute the default commands for the VMs `e-mail` (i.e. `thunderbird`) and `sys-net` (i.e. `xterm`).
 The `r` hotkey does the same as the `q` hotkey, but instead of command arguments it supports multiple VMs.
 
 ```
