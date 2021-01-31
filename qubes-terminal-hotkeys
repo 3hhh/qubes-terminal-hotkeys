@@ -3,8 +3,8 @@
 # Script to simplify daily work with the Qubes OS dom0 command line (e.g. managing & starting VMs and running commands in these).
 # Meant to be particularly useful with the awesome WM Meta+R key combination for executing commands in dom0.
 #
-# Copyright (C) 2020  David Hobach  GPLv3
-# version: 2.1
+# Copyright (C) 2021  David Hobach  GPLv3
+# version: 2.2
 # 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -260,7 +260,7 @@ case "$vmName" in
 esac
 }
 
-#action_run [vm] [command] [command argumnents]
+#action_run [vm] [command] [command arguments]
 #Executes the run action.
 function action_run {
 local vm="$1"
@@ -270,13 +270,39 @@ local vmCommand="$2"
 vmCommand="$(getRealCommand "$vm" "$vmCommand")"
 
 #execute any necessary pre-command in dom0
-execDom0PreCommand "$vm" "$vmCommand" $VERBOSE || errorOut "Executing the dom0 pre-command for $vm failed for some reason."
+execDom0PreCommand "$vm" "$vmCommand" $VERBOSE || errorOut "Executing the dom0 pre-command for the VM $vm failed for some reason."
 
 #execute
 #NOTE: in the ancient version of dom0 bash, 2x shift produces something different than shift 2 (the first removes a single parameter, the latter leaves it)
 shift
 shift
 execVMCommand "$vm" "$VERBOSE" "$vmCommand" "$@"
+}
+
+#maction_run [vm 1] ... [vm n]
+#Execute the default command for the given VMs.
+function maction_run {
+local vm=
+declare -A pids=() #VM --> pid
+for vm in "$@" ; do
+	action_run "$vm" &
+	pids["$vm"]=$!
+done
+
+local failed=""
+local ret=
+for vm in "${!pids[@]}" ; do
+	wait "${pids["$vm"]}"
+	ret=$?
+	[ $ret -ne 0 ] && failed="$failed"$'\n'"$vm ($ret)"
+done
+
+if [ $VERBOSE -eq 0 ] ; then
+	[ -z "$failed" ] || echo "The commands for the following VMs returned a non-zero exit code: $failed"
+fi
+
+#set exit code
+[ -z "$failed" ]
 }
 
 #maction_shutdown [vm 1] ... [vm n]

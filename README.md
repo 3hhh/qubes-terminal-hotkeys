@@ -57,11 +57,6 @@ q
 *Explanation:* Start a dom0 terminal.
 
 ```
-s m
-```
-*Explanation:* Shut the `e-mail` VM down.
-
-```
 q d c www.qubes-os.org
 ```
 *Explanation:* Start chromium inside a disposable VM and visit the Qubes OS homepage.
@@ -76,6 +71,17 @@ q somevm someapp
 ```
 *Explanation:* Start `someapp` inside `somevm` (full names are also supported as fallback).
 
+```
+r m net
+```
+*Explanation:* Execute the default commands for the VMs `e-mail` (i.e. `thunderbird`) and `sys-net` (i.e. `xterm`).  
+The `r` hotkey does the same as the `q` hotkey, but instead of command arguments it supports multiple VMs.
+
+```
+s m net
+```
+*Explanation:* Shut the VMs `e-mail` and `sys-net` down.
+
 ## Uninstall
 
 1. Inside the repository clone, execute `sudo ./installer uninstall`.
@@ -84,7 +90,7 @@ q somevm someapp
 
 ## Copyright
 
-© 2020 David Hobach
+© 2021 David Hobach
 GPLv3
 
 See `LICENSE` for details.
