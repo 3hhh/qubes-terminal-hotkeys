@@ -176,13 +176,7 @@ local start="${2:-0}"
 
 #make sure the VM is unpaused
 if qvm-check --paused "$vm" &> /dev/null ; then
-	if [[ "$vm" == "disp"* ]] ; then
-		qvm-unpause "$vm" &> /dev/null || return 1
-	else
-		#the qubes-gui-agent restart & clock sync is a hotfix for https://github.com/QubesOS/qubes-issues/issues/5988
-		#NOTE: qvm-run -a includes unpause
-		qvm-run -u root -a --nogui "$vm" "qvm-sync-clock ; systemctl restart qubes-gui-agent" &> /dev/null < /dev/null || return 1
-	fi
+	qvm-unpause "$vm" &> /dev/null || return 1
 else
 	if [ $start -eq 0 ] ; then
 		qvm-start --skip-if-running "$vm" &> /dev/null || return 1
