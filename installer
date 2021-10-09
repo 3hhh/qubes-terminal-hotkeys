@@ -72,7 +72,7 @@ local target=
 
 for bin in "$INSTALL_BIN/"* ; do
 	if [ -L "$bin" ] ; then
-		target="$(readlink -f "$bin")" || errorOut "Failed to execute readlink."
+		target="$(readlink -f "$bin")" || errorOut "Failed to execute readlink on $bin."
 		if [[ "$target" == "$QHK" ]] ; then
 			echo "Removing $bin ..."
 			rm -f "$bin" || errorOut "Failed to remove $bin."

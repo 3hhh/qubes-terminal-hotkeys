@@ -299,7 +299,38 @@ fi
 [ -z "$failed" ]
 }
 
+#maction_start [vm 1] ... [vm n]
+#Start the given VMs without executing any command.
+function maction_start {
+local ret=0
+
+local vm=
+declare -A pids=() #VM --> pid
+for vm in "$@" ; do
+	[[ "$vm" == "$DOM_ZERO_ID" ]] && continue
+	[ $VERBOSE -eq 0 ] && echo "Starting: $vm"
+	assertRunning "$vm" &
+	pids["$vm"]=$!
+done
+
+local failed=""
+local ret=
+for vm in "${!pids[@]}" ; do
+	wait "${pids["$vm"]}"
+	ret=$?
+	[ $ret -ne 0 ] && failed="$failed"$'\n'"$vm ($ret)"
+done
+
+if [ $VERBOSE -eq 0 ] ; then
+	[ -z "$failed" ] || echo "Starting the following VMs failed: $failed"
+fi
+
+#set exit code
+[ -z "$failed" ]
+}
+
 #maction_shutdown [vm 1] ... [vm n]
+#Shut the given VMs down.
 function maction_shutdown {
 local shutdownDom0=1
 local ret=0
@@ -332,6 +363,7 @@ return $ret
 }
 
 #maction_kill [vm 1] ... [vm n]
+#Kill the given VMs.
 function maction_kill {
 local killDom0=1
 local ret=0
@@ -356,6 +388,7 @@ return $ret
 }
 
 #maction_pause [vm 1] ... [vm n]
+#Pause the given VMs.
 function maction_pause {
 local ret=0
 
