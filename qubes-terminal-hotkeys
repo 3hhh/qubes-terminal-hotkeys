@@ -30,6 +30,9 @@ exit 1
 #directory of this script (hopefully...)
 SCRIPT_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 
+#path to qubes-pactl
+QUBES_PACTL="$SCRIPT_DIR/util/qubes-pactl"
+
 #whether to print verbose information (0) or not (1)
 VERBOSE=1
 
@@ -56,7 +59,10 @@ specials - action_run:
 	- for template VMs always start a disposable VM using that VM as template
 	- $DOM_ZERO_ID: Executes the given command in dom0.
 	- no VM specified: Executes $DOM_ZERO_DEFAULT_COMMAND in dom0.
-[additional arguments]: command and its arguments to execute in the given VM; if no command is specified, execute the default command for the given VM and if that one is not specified, fall back to the global default"
+[additional arguments]: command and its arguments to execute in the given VM; if no command is specified, execute the default command for the given VM and if that one is not specified, fall back to the global default
+
+specials - action_mute|action_unmute|action_toggle:
+[VM name or VM short name]: If no VM name is specified, the action will be executed for all currently existing VMs."
 }
 
 #getRealVMName [pseudo VM name provided by the user]
@@ -271,6 +277,30 @@ execDom0PreCommand "$vm" "$vmCommand" $VERBOSE || errorOut "Executing the dom0 p
 shift
 shift
 execVMCommand "$vm" "$VERBOSE" "$vmCommand" "$@"
+}
+
+#action_mute [vm]
+#Mute the given VM.
+function action_mute {
+local vm="$1"
+[[ "$vm" == "$DOM_ZERO_ID" ]] && vm=""
+"$QUBES_PACTL" "mute" "$vm"
+}
+
+#action_unmute [vm]
+#Mute the given VM.
+function action_unmute {
+local vm="$1"
+[[ "$vm" == "$DOM_ZERO_ID" ]] && vm=""
+"$QUBES_PACTL" "unmute" "$vm"
+}
+
+#action_toggleMute [vm]
+#Toggle the mute status of the given VM.
+function action_toggleMute {
+local vm="$1"
+[[ "$vm" == "$DOM_ZERO_ID" ]] && vm=""
+"$QUBES_PACTL" "toggle" "$vm"
 }
 
 #maction_run [vm 1] ... [vm n]

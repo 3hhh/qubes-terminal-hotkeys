@@ -1,0 +1,83 @@
+#!/bin/bash
+#
+# Control the mute status of Qubes OS VMs from command-line.
+
+set -e -o pipefail
+
+SCRIPT_NAME="${BASH_SOURCE[0]##*/}"
+
+function usage {
+  echo "$SCRIPT_NAME mute|unmute|toggle [vm]
+
+Execute the given action for the given VM (assumes pulseaudio in dom0 without sys-audio).
+
+Without any VM specified, the action will be executed on all VMs instead."
+  exit 1
+}
+
+function error {
+  >&2 echo "ERROR: $1"
+  exit 1
+}
+
+#get_id [vm]
+function get_id {
+  #NOTES:
+  # - apparently Qubes OS uses source-outputs for VM recording & sink-inputs for playback
+  # - both share the same ID per VM
+  local vm="$1"
+
+  if [ -n "$vm" ] ; then
+    #get the ID for the given VM
+    local id_regex='^Sink Input #([0-9]+)$'
+    local info line id
+
+    info="$(pactl list sink-inputs)" || error "Failed to execute pactl list sink-inputs."
+
+    while IFS= read -r line ; do
+      if [[ "$line" =~ $id_regex ]] ; then
+        id="${BASH_REMATCH[1]}"
+      elif [[ "$line" == *'application.name = "'"$vm"'"'* ]] ; then
+        echo "$id"
+        return
+      fi
+    done <<< "$info"
+  else
+    #get all IDs
+    pactl list short sink-inputs | sed -r 's/^([0-9]+).*$/\1/g'
+  fi
+}
+
+function main {
+  [ $# -lt 1 ] && usage
+  [ $# -gt 2 ] && usage
+
+  command -v "pactl" &> /dev/null || error "pactl is missing."
+  command -v "sed" &> /dev/null || error "sed is missing."
+
+  local cmd="$1"
+  local vm="$2"
+  if [[ "$cmd" == "mute" ]] ; then
+    pacmd="true"
+  elif [[ "$cmd" == "unmute" ]] ; then
+    pacmd="false"
+  elif [[ "$cmd" == "toggle" ]] ; then
+    pacmd="toggle"
+  else
+    error "Invalid command: $cmd"
+  fi
+
+  local vm_id=
+  vm_id="$(get_id "$vm")"
+  [ -n "$vm_id" ] || error "Failed to get the pulseaudio ID for the VM $vm."
+
+  local id=
+  while IFS= read -r id ; do
+    pactl set-sink-input-mute "$id" "$pacmd" || error "Failed to execute set-sink-input-mute."
+    pactl set-source-output-mute "$id" "$pacmd" || error "Failed to execute set-source-output-mute."
+  done <<< "$vm_id"
+
+  echo "${cmd}d $vm"
+}
+
+main "$@"
