@@ -3,8 +3,8 @@
 # Script to simplify daily work with the Qubes OS dom0 command line (e.g. managing & starting VMs and running commands in these).
 # Meant to be particularly useful with the awesome WM Meta+R key combination for executing commands in dom0.
 #
-# Copyright (C) 2021  David Hobach  GPLv3
-# version: 2.2
+# Copyright (C) 2022  David Hobach  GPLv3
+# version: 2.5
 # 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
