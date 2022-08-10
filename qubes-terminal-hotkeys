@@ -70,7 +70,8 @@ specials - action_mute|action_unmute|action_toggle:
 #returns: the real name or nothing, if it could not be found or there was an error
 function getRealVMName {
 #case insensitive @associative VM array
-local pseudoName=$(echo "$1" | tr "[:upper:]" "[:lower:]")
+local pseudoName=
+pseudoName="$(echo "$1" | tr "[:upper:]" "[:lower:]")" || errorOut "Failed to execute tr."
 local ret=""
 	case "$pseudoName" in
 		"")
@@ -123,7 +124,7 @@ local vmCommand="$2"
 
 if [ -n "$vmCommand" ] ; then
 	#user provided something -> check whether it can be mapped and if not, just return whatever the user wrote
-	local mappedCommand=${COMMANDS["$vmCommand"]}
+	local mappedCommand="${COMMANDS["$vmCommand"]}"
 		if [ -n "$mappedCommand" ] ; then
 			echo "$mappedCommand"
 		else
@@ -148,8 +149,8 @@ local verbose=$3
 [ -z "$vmName" ] && errorOut "execDom0PreCommand(): No VM specified."
 
 #get the dom0 pre-command, if any
-local preCommand=${DOM0_PRE_COMMANDS["${vmName}_${vmCommand}"]}
-[ -z "$preCommand" ] && preCommand=${DOM0_PRE_COMMANDS["${vmName}"]}
+local preCommand="${DOM0_PRE_COMMANDS["${vmName}_${vmCommand}"]}"
+[ -z "$preCommand" ] && preCommand="${DOM0_PRE_COMMANDS["${vmName}"]}"
 
 #something to execute?
 if [ -n "$preCommand" ] ; then
@@ -378,7 +379,7 @@ if [ $# -gt 0 ] ; then
 		qvm-unpause "$vm" &> /dev/null
 	done
 
-	[ $VERBOSE -eq 0 ] && echo "Shutting down: $@"
+	[ $VERBOSE -eq 0 ] && echo "Shutting down: $*"
 	qvm-shutdown --wait "$@"
 	ret=$?
 fi
@@ -404,7 +405,7 @@ if [[ "$1" == "$DOM_ZERO_ID" ]] ; then
 fi
 
 if [ $# -gt 0 ] ; then
-	[ $VERBOSE -eq 0 ] && echo "Killing: $@"
+	[ $VERBOSE -eq 0 ] && echo "Killing: $*"
 	qvm-kill "$@"
 	ret=$?
 fi
@@ -430,7 +431,7 @@ if [[ "$1" == "$DOM_ZERO_ID" ]] ; then
 fi
 
 if [ $# -gt 0 ] ; then
-	[ $VERBOSE -eq 0 ] && echo "Pausing: $@"
+	[ $VERBOSE -eq 0 ] && echo "Pausing: $*"
 	qvm-pause "$@"
 	ret=$?
 fi
