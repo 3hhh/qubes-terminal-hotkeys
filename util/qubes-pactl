@@ -23,6 +23,9 @@ set -e -o pipefail
 
 SCRIPT_NAME="${BASH_SOURCE[0]##*/}"
 
+#workaround to make pactl work as root, too
+PACTL="sudo -u #1000 XDG_RUNTIME_DIR=/run/user/1000 pactl"
+
 function usage {
   echo "$SCRIPT_NAME mute|unmute|toggle [vm]
 
@@ -50,7 +53,7 @@ function get_id {
     local id_regex='^Sink Input #([0-9]+)$'
     local info line id
 
-    info="$(pactl list sink-inputs)" || error "Failed to execute pactl list sink-inputs."
+    info="$($PACTL list sink-inputs)" || error "Failed to execute pactl list sink-inputs."
 
     while IFS= read -r line ; do
       if [[ "$line" =~ $id_regex ]] ; then
@@ -62,7 +65,7 @@ function get_id {
     done <<< "$info"
   else
     #get all IDs
-    pactl list short sink-inputs | sed -r 's/^([0-9]+).*$/\1/g'
+    $PACTL list short sink-inputs | sed -r 's/^([0-9]+).*$/\1/g'
   fi
 }
 
@@ -72,6 +75,9 @@ function main {
 
   command -v "pactl" &> /dev/null || error "pactl is missing."
   command -v "sed" &> /dev/null || error "sed is missing."
+  command -v "sudo" &> /dev/null || error "sudo is missing."
+
+  [ ! -d "/run/user/1000" ] && error "Unexpected user ID. No /run/user/1000 directory found."
 
   local cmd="$1"
   local vm="$2"
@@ -91,8 +97,8 @@ function main {
 
   local id=
   while IFS= read -r id ; do
-    pactl set-sink-input-mute "$id" "$pacmd" || error "Failed to execute set-sink-input-mute."
-    pactl set-source-output-mute "$id" "$pacmd" || error "Failed to execute set-source-output-mute."
+    $PACTL set-sink-input-mute "$id" "$pacmd" || error "Failed to execute set-sink-input-mute."
+    $PACTL set-source-output-mute "$id" "$pacmd" || error "Failed to execute set-source-output-mute."
   done <<< "$vm_id"
 
   echo "${cmd}d $vm"
