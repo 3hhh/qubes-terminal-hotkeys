@@ -393,6 +393,33 @@ fi
 return $ret
 }
 
+#maction_netvm [vm 1] ... [vm n] [netvm]
+#Assigns <netvm> as netVM for the given VMs
+function maction_netvm {
+
+# At least one VM to set netVM for, and a netVM name
+if [[ "$#" -lt 2 ]]; then
+    errorOut "You must provide a netVM name as argument"
+fi
+
+local netVM="${*: -1}"
+declare -a vms=("${@:1:$#-1}")
+
+# netVM must actually provide network
+if [[ "$netVM" != 'None' ]] && [[ "$(qvm-prefs "$netVM" provides_network)" == "False" ]]; then
+    errorOut "VM $netVM does provide network"
+fi
+
+# Change netvm for each VM
+for vm in "${vms[@]}" ; do
+    [ $VERBOSE -eq 0 ] && echo "Assigning $netVM as netVM for: $*"
+    qvm-prefs "$vm" netvm "$netVM"
+    ret=$?
+done
+
+return $ret
+}
+
 #maction_kill [vm 1] ... [vm n]
 #Kill the given VMs.
 function maction_kill {
