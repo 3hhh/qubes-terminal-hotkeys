@@ -42,7 +42,8 @@ exit 1
 }
 
 #get config
-CONF="$SCRIPT_DIR/qubes-terminal-hotkeys.conf"
+CONF="/etc/qubes-terminal-hotkeys.conf"
+[ -f "/etc/qubes-terminal-hotkeys.conf" ] || CONF="$SCRIPT_DIR/qubes-terminal-hotkeys.conf"
 source "$CONF" || errorOut "Failed to read the configuration $CONF."
 
 #qubes-terminal-hotkeys script
