@@ -90,7 +90,7 @@ s m net
 
 ## Copyright
 
-© 2021 David Hobach
+© 2022 David Hobach
 GPLv3
 
 See `LICENSE` for details.
