@@ -3,7 +3,7 @@
 # Control the mute status of Qubes OS VMs from command-line.
 #
 # Copyright (C) 2024  David Hobach  GPLv3
-# version: 1.1
+# version: 1.2
 # 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -27,11 +27,22 @@ SCRIPT_NAME="${BASH_SOURCE[0]##*/}"
 WPCTL="sudo -u #1000 XDG_RUNTIME_DIR=/run/user/1000 wpctl"
 
 function usage {
-  echo "$SCRIPT_NAME mute|unmute|toggle [vm]
+  echo "$SCRIPT_NAME mute [vm]|unmute [vm]|toggle [vm]|printOut|printIn|switchOut|switchIn|volumeOut [volume]|volumeIn [volume]
 
-Execute the given action for the given VM (assumes pulseaudio in dom0 without sys-audio).
+Execute the given action for the given VM (assumes pipewire in dom0 without sys-audio).
 
-If no VM is specified, the given command is executed for all running VMs."
+If no VM is specified, the given command is executed for all running VMs.
+
+mute [vm]: Mute the given VM.
+unmute [vm]: Unmute the given VM.
+toggle [vm]: Toggle the mute status of the given VM.
+printOut: Print the current default audio output.
+printIn: Print the current default audio input.
+switchOut: Switch the the default audio output to the next available output.
+switchIn: Switch the the default audio input to the next available input.
+volumeOut [volume]: Set the volume of the default output to the given value.
+volumeIn [volume]: Set the volume of the default input to the given value.
+"
   exit 1
 }
 
@@ -63,18 +74,7 @@ function get_ids {
   done <<< "$info"
 }
 
-function main {
-  [ $# -lt 1 ] && usage
-  [ $# -gt 2 ] && usage
-
-  command -v "qvm-ls" &> /dev/null || error "qvm-ls is missing."
-  command -v "wpctl" &> /dev/null || error "wpctl is missing."
-  command -v "sed" &> /dev/null || error "sed is missing."
-  command -v "grep" &> /dev/null || error "grep is missing."
-  command -v "sudo" &> /dev/null || error "sudo is missing."
-
-  [ ! -d "/run/user/1000" ] && error "Unexpected user ID. No /run/user/1000 directory found."
-
+function setMute {
   local cmd="$1"
   local vms="$2"
   if [[ "$cmd" == "mute" ]] ; then
@@ -105,6 +105,101 @@ function main {
   [ -n "$errs" ] && error "$errs"
   echo "${cmd}d:"
   echo "$vms"
+}
+
+function printDefault {
+  local skip="${1:-0}"
+  local field="${2:-2}"
+  local info="$3"
+  if [ -z "$info" ] ; then
+    info="$($WPCTL status)" || error "Failed to execute wpctl."
+  fi
+
+  local re='^.*\*[ ]*([0-9]+)\.[ ]*(.*)$'
+  local line=
+  while IFS= read -r line ; do
+    if [[ "$line" =~ $re ]] ; then
+      [ $skip -gt 0 ] && skip=$(( $skip -1 )) && continue
+      echo "${BASH_REMATCH[$field]}"
+      exit 0
+    fi
+  done <<< "$info"
+  exit 1
+}
+
+function switch {
+  local info=
+  info="$($WPCTL status)" || error "Failed to execute wpctl."
+  local section="$1"
+
+  #try to find the relevant section in the info
+  local line
+  local re='^[^0-9]*([0-9]+)\..*$'
+  local foundSection=1
+  local sectionContent=""
+  while IFS= read -r line ; do
+    if [ $foundSection -eq 0 ] ; then
+      [[ "$line" =~ $re ]] && sectionContent="$sectionContent"$'\n'"$line" || break
+    else
+      [[ "$line" == *"$section"* ]] && foundSection=0
+    fi
+  done <<< "$info"
+  [ -z "$sectionContent" ] && error "Couldn't find the section $section inside $info. Did the wpctl output change?!"
+
+  #get the first line and the line after the default
+  local next=1
+  local first=0
+  local firstId=""
+  local nextId=
+  while IFS= read -r line ; do
+    [ $first -eq 0 ] && [[ $line =~ $re ]] && firstId="${BASH_REMATCH[1]}" && first=1
+    [ $next -eq 0 ] && [[ $line =~ $re ]] && nextId="${BASH_REMATCH[1]}" && break
+    [[ "$line" == *'*'* ]] && next=0 #default found
+  done <<< "$sectionContent"
+
+  [ -z "$nextId" ] && nextId="$firstId"
+  $WPCTL set-default "$nextId"
+}
+
+function volume {
+  local skip="$1"
+  shift
+  local curId=
+  curId="$(printDefault "$skip" 1)" || error "Failed to retrieve the ID of the current default device."
+  $WPCTL set-volume "$curId" "$@"
+}
+
+function main {
+  [ $# -lt 1 ] && usage
+  [ $# -gt 2 ] && usage
+
+  command -v "qvm-ls" &> /dev/null || error "qvm-ls is missing."
+  command -v "wpctl" &> /dev/null || error "wpctl is missing."
+  command -v "sed" &> /dev/null || error "sed is missing."
+  command -v "grep" &> /dev/null || error "grep is missing."
+  command -v "sudo" &> /dev/null || error "sudo is missing."
+
+  [ ! -d "/run/user/1000" ] && error "Unexpected user ID. No /run/user/1000 directory found."
+
+  local cmd="$1"
+  shift
+  if [[ "$cmd" =~ ^(mute|unmute|toggle) ]] ; then
+    setMute "$@"
+  elif [[ "$cmd" == "printOut" ]] ; then
+    printDefault 0
+  elif [[ "$cmd" == "printIn" ]] ; then
+    printDefault 1
+  elif [[ "$cmd" == "switchOut" ]] ; then
+    switch "Sinks:"
+  elif [[ "$cmd" == "switchIn" ]] ; then
+    switch "Sources:"
+  elif [[ "$cmd" == "volumeOut" ]] ; then
+    volume 0 "$@"
+  elif [[ "$cmd" == "volumeIn" ]] ; then
+    volume 1 "$@"
+  else
+    error "Invalid command: $cmd"
+  fi
 }
 
 main "$@"
