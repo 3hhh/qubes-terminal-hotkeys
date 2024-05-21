@@ -30,8 +30,8 @@ exit 1
 #directory of this script (hopefully...)
 SCRIPT_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 
-#path to qubes-pactl
-QUBES_PACTL="$SCRIPT_DIR/util/qubes-pactl"
+#path to qubes-wpctl
+QUBES_WPCTL="$SCRIPT_DIR/util/qubes-wpctl"
 
 #whether to print verbose information (0) or not (1)
 VERBOSE=1
@@ -285,7 +285,7 @@ execVMCommand "$vm" "$VERBOSE" "$vmCommand" "$@"
 function action_mute {
 local vm="$1"
 [[ "$vm" == "$DOM_ZERO_ID" ]] && vm=""
-"$QUBES_PACTL" "mute" "$vm"
+"$QUBES_WPCTL" "mute" "$vm"
 }
 
 #action_unmute [vm]
@@ -293,7 +293,7 @@ local vm="$1"
 function action_unmute {
 local vm="$1"
 [[ "$vm" == "$DOM_ZERO_ID" ]] && vm=""
-"$QUBES_PACTL" "unmute" "$vm"
+"$QUBES_WPCTL" "unmute" "$vm"
 }
 
 #action_toggleMute [vm]
@@ -301,7 +301,7 @@ local vm="$1"
 function action_toggleMute {
 local vm="$1"
 [[ "$vm" == "$DOM_ZERO_ID" ]] && vm=""
-"$QUBES_PACTL" "toggle" "$vm"
+"$QUBES_WPCTL" "toggle" "$vm"
 }
 
 #maction_run [vm 1] ... [vm n]

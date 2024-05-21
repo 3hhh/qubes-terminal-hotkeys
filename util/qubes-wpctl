@@ -1,0 +1,110 @@
+#!/bin/bash
+#
+# Control the mute status of Qubes OS VMs from command-line.
+#
+# Copyright (C) 2024  David Hobach  GPLv3
+# version: 1.1
+# 
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+# 
+
+set -e -o pipefail
+
+SCRIPT_NAME="${BASH_SOURCE[0]##*/}"
+
+#workaround to make wpctl work as root, too
+WPCTL="sudo -u #1000 XDG_RUNTIME_DIR=/run/user/1000 wpctl"
+
+function usage {
+  echo "$SCRIPT_NAME mute|unmute|toggle [vm]
+
+Execute the given action for the given VM (assumes pulseaudio in dom0 without sys-audio).
+
+If no VM is specified, the given command is executed for all running VMs."
+  exit 1
+}
+
+function error {
+  >&2 echo "ERROR: $1"
+  >&2 echo "Aborting..."
+  exit 1
+}
+
+#get_ids [vm]
+function get_ids {
+  local vm="$1"
+
+  #get the ID for the given VM
+  local id_regex='^[ ]*([0-9]+)\.[ ]*([^ ]+)[ ]+.*$'
+  local info line id
+
+  info="$($WPCTL status)" || error "Failed to execute wpctl status."
+
+  local found=1
+  while IFS= read -r line ; do
+    #ignore everything until "Streams:"
+    [[ "$line" == *"Streams:"* ]] && found=0
+    [ $found -eq 0 ] || continue
+
+    if [[ "$line" =~ $id_regex ]] ; then
+      [[ "${BASH_REMATCH[2]}" == "$vm" ]] && echo "${BASH_REMATCH[1]}"
+    fi
+  done <<< "$info"
+}
+
+function main {
+  [ $# -lt 1 ] && usage
+  [ $# -gt 2 ] && usage
+
+  command -v "qvm-ls" &> /dev/null || error "qvm-ls is missing."
+  command -v "wpctl" &> /dev/null || error "wpctl is missing."
+  command -v "sed" &> /dev/null || error "sed is missing."
+  command -v "grep" &> /dev/null || error "grep is missing."
+  command -v "sudo" &> /dev/null || error "sudo is missing."
+
+  [ ! -d "/run/user/1000" ] && error "Unexpected user ID. No /run/user/1000 directory found."
+
+  local cmd="$1"
+  local vms="$2"
+  if [[ "$cmd" == "mute" ]] ; then
+    wpcmd="1"
+  elif [[ "$cmd" == "unmute" ]] ; then
+    wpcmd="0"
+  elif [[ "$cmd" == "toggle" ]] ; then
+    wpcmd="toggle"
+  else
+    error "Invalid command: $cmd"
+  fi
+
+  [ -z "$vms" ] && vms="$(qvm-ls --running -O NAME --raw-list | grep -Ev "^dom0$")"
+
+  local vm=
+  local errs=""
+  while IFS= read -r vm ; do
+    local vm_id=
+    vm_id="$(get_ids "$vm")"
+    [ -z "$vm_id" ] && errs="$errs"$'\n'"Failed to get the ID for the VM $vm." && continue
+
+    local id=
+    while IFS= read -r id ; do
+      $WPCTL set-mute "$id" "$wpcmd" || errs="$errs"$'\n'"Failed to execute $wpcmd for the VM $vm on ID $id."
+    done <<< "$vm_id"
+  done <<< "$vms"
+
+  [ -n "$errs" ] && error "$errs"
+  echo "${cmd}d:"
+  echo "$vms"
+}
+
+main "$@"
