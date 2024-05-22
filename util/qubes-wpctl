@@ -27,17 +27,16 @@ SCRIPT_NAME="${BASH_SOURCE[0]##*/}"
 WPCTL="sudo -u #1000 XDG_RUNTIME_DIR=/run/user/1000 wpctl"
 
 function usage {
-  echo "$SCRIPT_NAME mute [vm]|unmute [vm]|toggle [vm]|printOut|printIn|switchOut|switchIn|volumeOut [volume]|volumeIn [volume]
+  echo "$SCRIPT_NAME mute [vm]|unmute [vm]|toggle [vm]|printDefault|switchOut|switchIn|volumeOut [volume]|volumeIn [volume]
 
 Execute the given action for the given VM (assumes pipewire in dom0 without sys-audio).
 
 If no VM is specified, the given command is executed for all running VMs.
 
-mute [vm]: Mute the given VM.
-unmute [vm]: Unmute the given VM.
-toggle [vm]: Toggle the mute status of the given VM.
-printOut: Print the current default audio output.
-printIn: Print the current default audio input.
+mute [vm]: Mute the given VM. dom0 can be used to mute the default dom0 outputs and inputs.
+unmute [vm]: Unmute the given VM. dom0 can be used to unmute the default dom0 outputs and inputs.
+toggle [vm]: Toggle the mute status of the given VM. dom0 can be used to toggle the default dom0 outputs and inputs.
+printDefault: Print the current default audio output & input.
 switchOut: Switch the the default audio output to the next available output.
 switchIn: Switch the the default audio input to the next available input.
 volumeOut [volume]: Set the volume of the default output to the given value.
@@ -55,23 +54,37 @@ function error {
 #get_ids [vm]
 function get_ids {
   local vm="$1"
-
-  #get the ID for the given VM
-  local id_regex='^[ ]*([0-9]+)\.[ ]*([^ ]+)[ ]+.*$'
-  local info line id
-
+  local info=
   info="$($WPCTL status)" || error "Failed to execute wpctl status."
 
-  local found=1
-  while IFS= read -r line ; do
-    #ignore everything until "Streams:"
-    [[ "$line" == *"Streams:"* ]] && found=0
-    [ $found -eq 0 ] || continue
+  if [[ "$vm" == "dom0" ]] ; then
+    #special case: dom0 default inputs & sinks marked with a *
+    local re='^.*\*[ ]*([0-9]+)\.[ ]*(.*)$'
 
-    if [[ "$line" =~ $id_regex ]] ; then
-      [[ "${BASH_REMATCH[2]}" == "$vm" ]] && echo "${BASH_REMATCH[1]}"
-    fi
-  done <<< "$info"
+    while IFS= read -r line ; do
+      if [[ "$line" =~ $re ]] ; then
+        echo "${BASH_REMATCH[1]}"
+      fi
+    done <<< "$info"
+  else
+    #regular VMs
+
+    #get the ID for the given VM
+    local id_regex='^[ ]*([0-9]+)\.[ ]*([^ ]+)[ ]+.*$'
+    local line id
+
+    local found=1
+    while IFS= read -r line ; do
+      #ignore everything until "Streams:"
+      [[ "$line" == *"Streams:"* ]] && found=0
+      [ $found -eq 0 ] || continue
+
+      if [[ "$line" =~ $id_regex ]] ; then
+        [[ "${BASH_REMATCH[2]}" == "$vm" ]] && echo "${BASH_REMATCH[1]}"
+      fi
+    done <<< "$info"
+  fi
+  return 0
 }
 
 function setMute {
@@ -92,14 +105,14 @@ function setMute {
   local vm=
   local errs=""
   while IFS= read -r vm ; do
-    local vm_id=
-    vm_id="$(get_ids "$vm")"
-    [ -z "$vm_id" ] && errs="$errs"$'\n'"Failed to get the ID for the VM $vm." && continue
+    local vm_ids=
+    vm_ids="$(get_ids "$vm")"
+    [ -z "$vm_ids" ] && errs="$errs"$'\n'"Failed to get the ID for the VM $vm." && continue
 
     local id=
     while IFS= read -r id ; do
       $WPCTL set-mute "$id" "$wpcmd" || errs="$errs"$'\n'"Failed to execute $wpcmd for the VM $vm on ID $id."
-    done <<< "$vm_id"
+    done <<< "$vm_ids"
   done <<< "$vms"
 
   [ -n "$errs" ] && error "$errs"
@@ -108,7 +121,7 @@ function setMute {
 }
 
 function printDefault {
-  local skip="${1:-0}"
+  local skip="${1:--1}"
   local field="${2:-2}"
   local info="$3"
   if [ -z "$info" ] ; then
@@ -117,14 +130,22 @@ function printDefault {
 
   local re='^.*\*[ ]*([0-9]+)\.[ ]*(.*)$'
   local line=
+  local found=1
   while IFS= read -r line ; do
     if [[ "$line" =~ $re ]] ; then
       [ $skip -gt 0 ] && skip=$(( $skip -1 )) && continue
+      found=0
       echo "${BASH_REMATCH[$field]}"
-      exit 0
+      [ $skip -eq 0 ] && exit $found
     fi
   done <<< "$info"
-  exit 1
+  exit $found
+}
+
+function printDefaultNice {
+  local out=
+  out="$(printDefault)" || error "Failed to execute wpctl."
+  echo "Out: ${out/$'\n'/$'\nIn:  '}"
 }
 
 function switch {
@@ -184,11 +205,9 @@ function main {
   local cmd="$1"
   shift
   if [[ "$cmd" =~ ^(mute|unmute|toggle) ]] ; then
-    setMute "$@"
-  elif [[ "$cmd" == "printOut" ]] ; then
-    printDefault 0
-  elif [[ "$cmd" == "printIn" ]] ; then
-    printDefault 1
+    setMute "$cmd" "$@"
+  elif [[ "$cmd" == "printDefault" ]] ; then
+    printDefaultNice
   elif [[ "$cmd" == "switchOut" ]] ; then
     switch "Sinks:"
   elif [[ "$cmd" == "switchIn" ]] ; then
