@@ -393,6 +393,21 @@ fi
 return $ret
 }
 
+#maction_restart [vm 1] ... [vm n]
+#Shut the given VMs down, then start them again without executing any command.
+function maction_restart {
+maction_shutdown "$@" || return $?
+maction_start "$@"
+}
+
+#maction_restart_run [vm 1] ... [vm n]
+#Shut the given VMs down, then start them again and execute the default command.
+function maction_restart_run {
+maction_shutdown "$@" || return $?
+maction_run "$@"
+}
+
+
 #maction_kill [vm 1] ... [vm n]
 #Kill the given VMs.
 function maction_kill {
