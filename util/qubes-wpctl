@@ -2,8 +2,8 @@
 #
 # Control the mute status of Qubes OS VMs from command-line.
 #
-# Copyright (C) 2024  David Hobach  GPLv3
-# version: 1.2
+# Copyright (C) 2025  David Hobach  GPLv3
+# version: 1.3
 # 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -19,205 +19,284 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 # 
 
-set -e -o pipefail
+#init blib
+source blib
+b_checkVersion 1 6 || { >&2 echo "This script depends on blib (https://github.com/3hhh/blib) version 1.6 or higher. Please install a supported version." ; exit 1 ; }
+eval "$B_SCRIPT"
+b_import "types"
+b_import "os/qubes4/dom0"
 
-SCRIPT_NAME="${BASH_SOURCE[0]##*/}"
+#distinguish the B_E exit code from the "normal" error
+B_RC=6
+B_DOM0_QVM_RUN_PARAMS=("--no-gui")
 
-#workaround to make wpctl work as root, too
-WPCTL="sudo -u #1000 XDG_RUNTIME_DIR=/run/user/1000 wpctl"
+#helper array for execVMFunc
+declare -a VM_FUNCTIONS=()
+
+#name and user of the audio VM to work with, initialized in main()
+AUDIO_VM=""
+AUDIO_USER=""
 
 function usage {
-  echo "$SCRIPT_NAME mute [vm]|unmute [vm]|toggle [vm]|printDefault|switchOut|switchIn|volumeOut [volume]|volumeIn [volume]
+echo "$B_SCRIPT_NAME mute [vm]|unmute [vm]|toggle [vm]|printDefault|switchOut|switchIn|volumeOut [volume]|volumeIn [volume]
 
-Execute the given action for the given VM (assumes pipewire in dom0 without sys-audio).
+dom0 script to execute the given action for the given VM (assumes pipewire in your audio VM).
 
 If no VM is specified, the given command is executed for all running VMs.
 
-mute [vm]: Mute the given VM. dom0 can be used to mute the default dom0 outputs and inputs.
-unmute [vm]: Unmute the given VM. dom0 can be used to unmute the default dom0 outputs and inputs.
-toggle [vm]: Toggle the mute status of the given VM. dom0 can be used to toggle the default dom0 outputs and inputs.
+mute [vm]: Mute the given VM. default can be used to mute the default outputs and inputs.
+unmute [vm]: Unmute the given VM. default can be used to unmute the default outputs and inputs.
+toggle [vm]: Toggle the mute status of the given VM. default can be used to toggle the default outputs and inputs.
 printDefault: Print the current default audio output & input.
 switchOut: Switch the the default audio output to the next available output.
 switchIn: Switch the the default audio input to the next available input.
 volumeOut [volume]: Set the volume of the default output to the given value.
 volumeIn [volume]: Set the volume of the default input to the given value.
+app: Start the volume control app.
 "
-  exit 1
+exit 1
 }
 
-function error {
-  >&2 echo "ERROR: $1"
-  >&2 echo "Aborting..."
-  exit 1
+#execVMFunc [function] [parameters]
+#Executes the given vm_ function inside the audio VM. Passes the _UNSAFE_ VM stdout to dom0.
+#returns: Whatever the function returns. Unsafe!!! Use b_types_str or similar methods to sanitize it.
+#@B_E
+function execVMFunc {
+local func="$1"
+shift
+
+#execute locally, if dom0 is used as audio VM
+if [[ "$AUDIO_VM" == "dom0" ]] ; then
+  ( "$func" "$@" ) || { B_ERR="Failed to execute $func. See the previous output for details." ; B_E ; }
+fi
+
+#initialize the list of functions to pass to the backup VM (if needed)
+if [ ${#VM_FUNCTIONS[@]} -eq 0 ] ; then
+	local re='^declare -f (vm_.*)$'
+	while b_readLine ; do
+		[[ "$B_LINE" =~ $re ]] && VM_FUNCTIONS+=("${BASH_REMATCH[1]}")
+	done <<< "$(declare -F)"
+fi
+
+b_dom0_execFuncIn "$AUDIO_VM" "$AUDIO_USER" "$func" - "${VM_FUNCTIONS[@]}" - "$@"
 }
 
-#get_ids [vm]
-function get_ids {
-  local vm="$1"
-  local info=
-  info="$($WPCTL status)" || error "Failed to execute wpctl status."
+#checkDependencies
+#Checks whether the current bash environment suffices the dependency requirements to run this script.
+#returns: Nothing, but errors out, if the dependencies are not met.
+#@B_E
+function checkDependencies {
+b_deps "qvm-prefs" "qubes-prefs" "qvm-ls" "grep"
 
-  if [[ "$vm" == "dom0" ]] ; then
-    #special case: dom0 default inputs & sinks marked with a *
-    local re='^.*\*[ ]*([0-9]+)\.[ ]*(.*)$'
+#the VM dependencies are checked on first execution
+b_dom0_setVMDeps "wpctl
+pavucontrol"
+}
 
-    while IFS= read -r line || [ -n "$line" ] ; do
-      if [[ "$line" =~ $re ]] ; then
-        echo "${BASH_REMATCH[1]}"
-      fi
-    done <<< "$info"
-  else
-    #regular VMs
+#vm_get_ids [vm]
+function vm_get_ids {
+local vm="$1"
+local info=
+info="$(wpctl status)" || { B_ERR="Failed to execute wpctl status." ; B_E ; }
 
-    #get the ID for the given VM
-    local id_regex='^[ ]*([0-9]+)\.[ ]*([^ ]+)[ ]+.*$'
-    local line id
+if [[ "$vm" == "default" ]] ; then
+  #special case: default inputs & sinks marked with a *
+  local re='^.*\*[ ]*([0-9]+)\.[ ]*(.*)$'
 
-    local found=1
-    while IFS= read -r line || [ -n "$line" ] ; do
-      #ignore everything until "Streams:"
-      [[ "$line" == *"Streams:"* ]] && found=0
-      [ $found -eq 0 ] || continue
+  while IFS= read -r line || [ -n "$line" ] ; do
+    if [[ "$line" =~ $re ]] ; then
+      echo "${BASH_REMATCH[1]}"
+    fi
+  done <<< "$info"
+else
+  #regular VMs
 
-      if [[ "$line" =~ $id_regex ]] ; then
-        [[ "${BASH_REMATCH[2]}" == "$vm" ]] && echo "${BASH_REMATCH[1]}"
-      fi
-    done <<< "$info"
-  fi
-  return 0
+  #get the ID for the given VM
+  local id_regex='^[ ]*([0-9]+)\.[ ]*([^ ]+)[ ]+.*$'
+  local line id
+
+  local found=1
+  while IFS= read -r line || [ -n "$line" ] ; do
+    #ignore everything until "Streams:"
+    [[ "$line" == *"Streams:"* ]] && found=0
+    [ $found -eq 0 ] || continue
+
+    if [[ "$line" =~ $id_regex ]] ; then
+      [[ "${BASH_REMATCH[2]}" == "$vm" ]] && echo "${BASH_REMATCH[1]}"
+    fi
+  done <<< "$info"
+fi
+return 0
+}
+
+#vm_setMute [wpcmd] [vm list]
+function vm_setMute {
+local wpcmd="$1"
+local vms="$2"
+
+local vm=
+local errs=""
+while IFS= read -r vm || [ -n "$vm" ] ; do
+  local vm_ids=
+  vm_ids="$(vm_get_ids "$vm")"
+  [ -z "$vm_ids" ] && errs="$errs"$'\n'"Failed to get the ID for the VM $vm." && continue
+
+  local id=
+  while IFS= read -r id || [ -n "$id" ] ; do
+    wpctl set-mute "$id" "$wpcmd" || errs="$errs"$'\n'"Failed to execute $wpcmd for the VM $vm on ID $id."
+  done <<< "$vm_ids"
+done <<< "$vms"
+
+echo "${cmd}d:"
+echo "$vms"
+[ -z "$errs" ] || { B_ERR="$errs" ; B_E ; }
 }
 
 function setMute {
-  local cmd="$1"
-  local vms="$2"
-  if [[ "$cmd" == "mute" ]] ; then
-    wpcmd="1"
-  elif [[ "$cmd" == "unmute" ]] ; then
-    wpcmd="0"
-  elif [[ "$cmd" == "toggle" ]] ; then
-    wpcmd="toggle"
-  else
-    error "Invalid command: $cmd"
-  fi
+local cmd="$1"
+local vms="$2"
+if [[ "$cmd" == "mute" ]] ; then
+  wpcmd="1"
+elif [[ "$cmd" == "unmute" ]] ; then
+  wpcmd="0"
+elif [[ "$cmd" == "toggle" ]] ; then
+  wpcmd="toggle"
+else
+  B_ERR="Invalid command: $cmd"
+  B_E
+fi
 
-  [ -z "$vms" ] && vms="$(qvm-ls --running -O NAME --raw-list | grep -Ev "^dom0$")"
+if [ -z "$vms" ] ; then
+  vms="$(set -e -o pipefail ; qvm-ls --running -O NAME --raw-list | grep -Ev "^dom0$")" || { B_ERR="Failed to execute qvm-ls." ; B_E ; }
+fi
 
-  local vm=
-  local errs=""
-  while IFS= read -r vm || [ -n "$vm" ] ; do
-    local vm_ids=
-    vm_ids="$(get_ids "$vm")"
-    [ -z "$vm_ids" ] && errs="$errs"$'\n'"Failed to get the ID for the VM $vm." && continue
-
-    local id=
-    while IFS= read -r id || [ -n "$id" ] ; do
-      $WPCTL set-mute "$id" "$wpcmd" || errs="$errs"$'\n'"Failed to execute $wpcmd for the VM $vm on ID $id."
-    done <<< "$vm_ids"
-  done <<< "$vms"
-
-  [ -n "$errs" ] && error "$errs"
-  echo "${cmd}d:"
-  echo "$vms"
+b_silence execVMFunc "vm_setMute" "$wpcmd" "$vms"
 }
 
-function printDefault {
-  local skip="${1:--1}"
-  local field="${2:-2}"
-  local info="$3"
-  if [ -z "$info" ] ; then
-    info="$($WPCTL status)" || error "Failed to execute wpctl."
-  fi
+function vm_printDefault {
+local skip="${1:--1}"
+local field="${2:-2}"
+local info="$3"
+if [ -z "$info" ] ; then
+  info="$(wpctl status)" || { B_ERR="Failed to execute wpctl." ; B_E ; }
+fi
 
-  local re='^.*\*[ ]*([0-9]+)\.[ ]*(.*)$'
-  local line=
-  local found=1
-  while IFS= read -r line || [ -n "$line" ] ; do
-    if [[ "$line" =~ $re ]] ; then
-      [ $skip -gt 0 ] && skip=$(( $skip -1 )) && continue
-      found=0
-      echo "${BASH_REMATCH[$field]}"
-      [ $skip -eq 0 ] && exit $found
-    fi
-  done <<< "$info"
-  exit $found
+local re='^.*\*[ ]*([0-9]+)\.[ ]*(.* \[.*\])$'
+local line=
+local found=1
+while IFS= read -r line || [ -n "$line" ] ; do
+  if [[ "$line" =~ $re ]] ; then
+    [ $skip -gt 0 ] && skip=$(( $skip -1 )) && continue
+    found=0
+    echo "${BASH_REMATCH[$field]}"
+    [ $skip -eq 0 ] && exit $found
+  fi
+done <<< "$info"
+exit $found
 }
 
 function printDefaultNice {
-  local out=
-  out="$(printDefault)" || error "Failed to execute wpctl."
-  echo "Out: ${out/$'\n'/$'\nIn:  '}"
+local out=
+out="$(b_types_str execVMFunc vm_printDefault)" || { B_ERR="Failed to execute wpctl inside the audio VM." ; B_E ; }
+echo "Out: ${out/$'\n'/$'\nIn:  '}"
 }
 
-function switch {
-  local info=
-  info="$($WPCTL status)" || error "Failed to execute wpctl."
-  local section="$1"
+function vm_switch {
+local info=
+info="$(wpctl status)" || { B_ERR="Failed to execute wpctl." ; B_E ; }
+local section="$1"
 
-  #try to find the relevant section in the info
-  local line
-  local re='^[^0-9]*([0-9]+)\..*$'
-  local foundSection=1
-  local sectionContent=""
-  while IFS= read -r line || [ -n "$line" ] ; do
-    if [ $foundSection -eq 0 ] ; then
-      [[ "$line" =~ $re ]] && sectionContent="$sectionContent"$'\n'"$line" || break
-    else
-      [[ "$line" == *"$section"* ]] && foundSection=0
-    fi
-  done <<< "$info"
-  [ -z "$sectionContent" ] && error "Couldn't find the section $section inside $info. Did the wpctl output change?!"
+#try to find the relevant section in the info
+local line
+local re='^[^0-9]*([0-9]+)\..*$'
+local foundSection=1
+local sectionContent=""
+while IFS= read -r line || [ -n "$line" ] ; do
+  if [ $foundSection -eq 0 ] ; then
+    [[ "$line" =~ $re ]] && sectionContent="$sectionContent"$'\n'"$line" || break
+  else
+    [[ "$line" == *"$section"* ]] && foundSection=0
+  fi
+done <<< "$info"
+[ -z "$sectionContent" ] && { B_ERR="Couldn't find the section $section inside $info. Did the wpctl output change?!" ; B_E ; }
 
-  #get the first line and the line after the default
-  local next=1
-  local first=0
-  local firstId=""
-  local nextId=
-  while IFS= read -r line || [ -n "$line" ] ; do
-    [ $first -eq 0 ] && [[ $line =~ $re ]] && firstId="${BASH_REMATCH[1]}" && first=1
-    [ $next -eq 0 ] && [[ $line =~ $re ]] && nextId="${BASH_REMATCH[1]}" && break
-    [[ "$line" == *'*'* ]] && next=0 #default found
-  done <<< "$sectionContent"
+#get the first line and the line after the default
+local next=1
+local first=0
+local firstId=""
+local nextId=
+while IFS= read -r line || [ -n "$line" ] ; do
+  [ $first -eq 0 ] && [[ $line =~ $re ]] && firstId="${BASH_REMATCH[1]}" && first=1
+  [ $next -eq 0 ] && [[ $line =~ $re ]] && nextId="${BASH_REMATCH[1]}" && break
+  [[ "$line" == *'*'* ]] && next=0 #default found
+done <<< "$sectionContent"
 
-  [ -z "$nextId" ] && nextId="$firstId"
-  $WPCTL set-default "$nextId"
+[ -z "$nextId" ] && nextId="$firstId"
+wpctl set-default "$nextId"
 }
 
-function volume {
-  local skip="$1"
-  shift
-  local curId=
-  curId="$(printDefault "$skip" 1)" || error "Failed to retrieve the ID of the current default device."
-  $WPCTL set-volume "$curId" "$@"
+function vm_volume {
+local skip="$1"
+shift
+local curId=
+curId="$(vm_printDefault "$skip" 1)" || { B_ERR="Failed to retrieve the ID of the current default device." ; B_E ; }
+wpctl set-volume -l 1.0 "$curId" "$@"
+}
+
+function vm_app {
+pavucontrol
+}
+
+#initAudioVars [vm]
+#Initialize AUDIO_VM & AUDIO_USER. If not VM is specified, use the default audio VM.
+#@B_E
+function initAudioVars {
+local vm="$1"
+
+if [ -n "$vm" ] ; then
+  AUDIO_VM="$(qvm-prefs "$vm" "audiovm")" || { B_ERR="Failed to identify the audiovm for the VM $vm." ; B_E ; }
+  [ -z "$AUDIO_VM" ] && B_ERR="No audiovm property set for the VM $vm." && B_E
+else
+  AUDIO_VM="$(qubes-prefs "default_audiovm")" || { B_ERR="Failed to retrieve the default_audiovm ." ; B_E ; }
+  [ -z "$AUDIO_VM" ] && B_ERR="No default_audiovm property set." && B_E
+fi
+
+AUDIO_USER="$(qvm-prefs "$AUDIO_VM" "default_user")" || { B_ERR="Failed to identify the $AUDIO_VM user." ; B_E ; }
+[ -z "$AUDIO_USER" ] && B_ERR="No default_user for the VM $AUDIO_VM found." && B_E
 }
 
 function main {
   [ $# -lt 1 ] && usage
   [ $# -gt 2 ] && usage
 
-  command -v "qvm-ls" &> /dev/null || error "qvm-ls is missing."
-  command -v "wpctl" &> /dev/null || error "wpctl is missing."
-  command -v "sed" &> /dev/null || error "sed is missing."
-  command -v "grep" &> /dev/null || error "grep is missing."
-  command -v "sudo" &> /dev/null || error "sudo is missing."
-
-  [ ! -d "/run/user/1000" ] && error "Unexpected user ID. No /run/user/1000 directory found."
+  checkDependencies
 
   local cmd="$1"
   shift
   if [[ "$cmd" =~ ^(mute|unmute|toggle) ]] ; then
+    initAudioVars "$2"
     setMute "$cmd" "$@"
   elif [[ "$cmd" == "printDefault" ]] ; then
+    initAudioVars
     printDefaultNice
   elif [[ "$cmd" == "switchOut" ]] ; then
-    switch "Sinks:"
+    initAudioVars
+    b_silence execVMFunc "vm_switch" "Sinks:"
   elif [[ "$cmd" == "switchIn" ]] ; then
-    switch "Sources:"
+    initAudioVars
+    b_silence execVMFunc "vm_switch" "Sources:"
   elif [[ "$cmd" == "volumeOut" ]] ; then
-    volume 0 "$@"
+    initAudioVars
+    b_silence execVMFunc "vm_volume" 0 "$@"
   elif [[ "$cmd" == "volumeIn" ]] ; then
-    volume 1 "$@"
+    initAudioVars
+    b_silence execVMFunc "vm_volume" 1 "$@"
+  elif [[ "$cmd" == "app" ]] ; then
+    initAudioVars
+    b_silence execVMFunc "vm_app"
   else
-    error "Invalid command: $cmd"
+    B_ERR="Invalid command: $cmd"
+    B_E
   fi
 }
 
